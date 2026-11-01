@@ -154,6 +154,30 @@ class TestMemoryManager:
         mgr.add_provider(ok)
         assert mgr.get_provider("ok") is ok
 
+    def test_failed_initialize_drops_provider_and_tools(self, tmp_path):
+        class BrokenProvider(FakeMemoryProvider):
+            def initialize(self, session_id, **kwargs):
+                self.initialized = True
+                raise RuntimeError("writer busy")
+
+        provider = BrokenProvider("broken", tools=[
+            {"name": "broken_recall", "description": "Broken", "parameters": {}},
+        ])
+        mgr = MemoryManager()
+        mgr.add_provider(provider)
+        say = MagicMock()
+
+        assert not mgr.initialize_for_agent(
+            say=say, session_id="session-1", hermes_home=str(tmp_path),
+        )
+        assert provider.initialized
+        assert mgr.providers == []
+        assert mgr.get_all_tool_names() == set()
+        mgr.sync_all("remember this", "ok", session_id="session-1")
+        assert provider.synced_turns == []
+        say.assert_called_once()
+        assert "initialization failed" in say.call_args.args[0]
+
     def test_on_turn_start_passes_each_provider_only_the_kwargs_it_accepts(self):
         """A provider with the two-positional ``on_turn_start`` still runs; one declaring the author kwargs gets them."""
         class AuthorAwareProvider(FakeMemoryProvider):

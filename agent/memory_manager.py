@@ -904,27 +904,34 @@ class MemoryManager:
         )
 
     def initialize_for_agent(self, say: Optional[Callable[[str], None]] = None, **kwargs) -> bool:
-        """``initialize_all`` for an agent build; True while an external provider is still served. One
-        refused as another profile's shared instance is dropped, and ``say`` (the agent's startup
-        warning sink) tells the user this profile now runs without it."""
+        """``initialize_all`` for an agent build; True while an external provider is still served.
+        ``say`` (the agent's startup warning sink) tells the user why a provider was dropped."""
         before = [p for p in self._providers if p.name != "builtin"]
-        self.initialize_all(**kwargs)
+        dropped = self.initialize_all(**kwargs)
         for provider in (p for p in before if not any(p is kept for kept in self._providers)):
-            message = (f"⚠ Memory provider {provider.name!r} is disabled for this profile: it handed out the "
-                       "provider instance another profile already uses. Built-in memory still works; the "
-                       "operator can see why with `hermes logs errors`.")
+            reason = dropped.get(id(provider), "it could not be initialized")
+            message = (f"⚠ Memory provider {provider.name!r} is disabled for this profile: {reason}. "
+                       "Built-in memory still works; the operator can see why with `hermes logs errors`.")
             (say or logger.warning)(message)
         return self._has_external
 
-    def initialize_all(self, session_id: str, **kwargs) -> None:
-        """Initialize all providers, injecting ``hermes_home`` so they resolve profile-scoped paths."""
+    def initialize_all(self, session_id: str, **kwargs) -> dict[int, str]:
+        """Initialize providers and return the reasons for any that were dropped."""
         if "hermes_home" not in kwargs:
             from hermes_constants import get_hermes_home
             kwargs["hermes_home"] = str(get_hermes_home())
         self._bound_scope = bound_scope(kwargs["hermes_home"], kwargs.get("agent_identity"))
+        dropped: dict[int, str] = {}
         # One instance, one profile: never rebind an instance another profile's manager bound (#140058).
         for provider in [p for p in self._providers if p.name != "builtin"]:
             if not claim_instance(provider, kwargs["hermes_home"]):
                 self._drop_provider(provider)
-        self._each_provider("initialize failed", lambda p: p.initialize(session_id=session_id, **kwargs),
-                            level=logging.WARNING)
+                dropped[id(provider)] = "it handed out the provider instance another profile already uses"
+        for provider in list(self._providers):
+            try:
+                provider.initialize(session_id=session_id, **kwargs)
+            except Exception as e:
+                logger.warning("Memory provider '%s' initialize failed: %s", provider.name, e, exc_info=True)
+                self._drop_provider(provider)
+                dropped[id(provider)] = "its initialization failed"
+        return dropped
