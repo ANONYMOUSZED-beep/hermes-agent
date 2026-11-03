@@ -178,6 +178,11 @@ def _current_session_id() -> str | None:
     return None if turn is None else turn.lease.session_id
 
 
+def _reject_sync_execution_on_event_loop() -> None:
+    if _has_running_event_loop():
+        raise RuntimeError("Synchronous Relay LLM execution cannot run on an event-loop thread")
+
+
 def execute(
     request: dict[str, Any], callback: Callable[[dict[str, Any]], Any], *, name: str, model_name: str,
     session_id: str | None = None, metadata: dict[str, Any] | None = None, defer_logical_completion: bool = False,
@@ -188,6 +193,7 @@ def execute(
     if attempt is None:
         return callback(request)
     try:
+        _reject_sync_execution_on_event_loop()
         managed = _run_awaitable(attempt.run_managed(
             attempt.runtime.relay.llm.execute, partial(attempt.invoke, callback)
         ))
@@ -960,5 +966,7 @@ def _run_awaitable(
     if not inspect.isawaitable(value):
         return value
     if _has_running_event_loop():
+        if inspect.iscoroutine(value):
+            value.close()
         raise RuntimeError(loop_error)
     return asyncio.run(value)
