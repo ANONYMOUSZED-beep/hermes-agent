@@ -276,6 +276,13 @@ _EXPLICIT_API_MODES = {
 
 def _resolve_api_mode(agent, api_mode, provider_name, base_url):
     """Set ``agent.api_mode`` (and provider rewrites) — ordered ladder, first match wins."""
+    if agent.api_mode == "anthropic_messages":
+        agent.base_url = str(client_kwargs.get("base_url") or agent.base_url or "")
+        _init_anthropic_client(
+            agent, client_kwargs.get("api_key", ""), agent.base_url, _provider_timeout
+        )
+        return
+
     from hermes_cli.providers import is_actual_route
     from agent.transports import registered_api_modes
     host, url = agent._base_url_hostname, agent._base_url_lower
