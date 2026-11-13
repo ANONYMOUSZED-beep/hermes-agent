@@ -42,6 +42,13 @@ def _banner(capsys, key) -> str:
     return capsys.readouterr().out
 
 
+def _anthropic_401(capsys, key) -> str:
+    from agent.turn_recovery import _print_anthropic_401_diagnostics
+
+    _print_anthropic_401_diagnostics(SimpleNamespace(log_prefix="", platform="cli"), key)
+    return capsys.readouterr().out
+
+
 def _entra_provider(monkeypatch):
     from agent import azure_identity_adapter as adapter
 
@@ -104,6 +111,16 @@ def test_key_banner_labels_a_callable_key_by_its_source(capsys, monkeypatch, bui
     assert t(label_key) in out, out
     if label_key != "cli.config.microsoft_entra_id":
         assert "Microsoft Entra ID" not in out, out
+
+
+@pytest.mark.parametrize(("build", "label_key"), CASES)
+def test_anthropic_401_labels_a_callable_key_by_its_source(capsys, monkeypatch, build, label_key):
+    out = _anthropic_401(capsys, build(monkeypatch))
+    assert t(label_key) in out, out
+    if label_key != "cli.config.microsoft_entra_id":
+        assert "Microsoft Entra ID" not in out, out
+    if label_key == "cli.config.key_cmd_token":
+        assert "Run this provider's `key_cmd` manually" in out, out
 
 
 def test_both_surfaces_share_one_source_table():
